@@ -21,7 +21,7 @@ class FeedListViewModel: ObservableObject {
     /// 加载指定订阅源的文章
     /// - Parameter feed: 需要加载文章的订阅源对象
     func loadArticles(for feed: Feed) {
-        FeedService.shared.fetchArticles(from: feed.url) { [weak self] result in
+        FeedService.shared.fetchArticles(from: feed) { [weak self] result in
             switch result {
             case .success(let articles):
                 // 使用主线程更新UI数据（虽然已在@MainActor中，但显式声明确保安全）
@@ -58,14 +58,14 @@ class FeedListViewModel: ObservableObject {
                 
                 // 生成唯一标识符用于本地存储
                 let feedID = UUID()
-                
+                // 创建新的订阅源对象
+                let feed = Feed(id: feedID, title: "", url: url)
                 // 解析RSS数据
-                let (parsedTitle, _) = try parser.parse(data: data, feedID: feedID)
-                
+                let (parsedTitle, _) = try parser.parse(data: data, feed: feed)
+                print("[添加订阅] 初始ID: \(feedID)")
                 // 确定最终显示标题：优先使用用户输入 > 解析结果 > 原始URL
                 let finalTitle = (customTitle?.isEmpty == false ? customTitle : parsedTitle) ?? urlString
                 
-                // 创建新的订阅源对象
                 let newFeed = Feed(id: feedID, title: finalTitle, url: url)
                 
                 // 主线程更新数据源

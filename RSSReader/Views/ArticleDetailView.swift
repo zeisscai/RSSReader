@@ -10,15 +10,15 @@ import WebKit
 
 /// 文章详情视图，展示单篇文章的完整内容
 struct ArticleDetailView: View {
-    let article: Article
+    //let article: Article
     // 使用@StateObject管理视图模型，确保生命周期与视图一致
     @StateObject private var viewModel: ArticleDetailViewModel
     @State private var webViewHeight: CGFloat = 100 // 初始高度
     // 自定义初始化方法，接收文章参数
-//    init(article: Article) {
-//        // 初始化视图模型并包装为StateObject
-//        _viewModel = StateObject(wrappedValue: ArticleDetailViewModel(article: article))
-//    }
+    init(article: Article) {
+        // 初始化视图模型并包装为StateObject
+        _viewModel = StateObject(wrappedValue: ArticleDetailViewModel(article: article))
+    }
     
     var body: some View {
         // 使用ScrollView支持内容滚动
@@ -39,7 +39,7 @@ struct ArticleDetailView: View {
                 Divider()
                 
                 // HTML内容展示视图
-                DynamicHeightWebView(htmlContent: article.content, webViewHeight: $webViewHeight)
+                DynamicHeightWebView(htmlContent: viewModel.article.content, webViewHeight: $webViewHeight)
                                     .frame(height: webViewHeight)
                                     .background(Color(.systemBackground))
                 
@@ -66,39 +66,49 @@ struct ArticleDetailView: View {
 struct DynamicHeightWebView: UIViewRepresentable {
     let htmlContent: String
     @Binding var webViewHeight: CGFloat
+    @Environment(\.colorScheme) var colorScheme // 获取当前颜色模式
     
     func makeUIView(context: Context) -> WKWebView {
         let webView = WKWebView()
         webView.navigationDelegate = context.coordinator
-        webView.scrollView.isScrollEnabled = false // 禁用内部滚动
+        webView.scrollView.isScrollEnabled = false
         webView.isOpaque = false
         webView.backgroundColor = .clear
         
-        // 添加自适应视口的 meta 标签
-        let meta = """
-        <meta name='viewport' content='width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no'>
-        <style>
-            body { 
-                font-size: 18px; 
-                line-height: 1.6; 
-                color: #333; 
-                padding: 16px; 
-                margin: 0; 
-            }
-            img { max-width: 100% !important; height: auto !important; }
-            iframe { width: 100% !important; }
-        </style>
-        """
-        
-        webView.loadHTMLString(meta + htmlContent, baseURL: nil)
+        // 加载带有动态颜色适配的内容
+        loadContent(in: webView)
         return webView
     }
     
     func updateUIView(_ uiView: WKWebView, context: Context) {
-        // 仅在内容变化时重新加载
-        if !context.coordinator.loaded {
-            uiView.reload()
+        // 颜色模式变化时重新加载
+        if context.coordinator.lastColorScheme != colorScheme {
+            loadContent(in: uiView)
+            context.coordinator.lastColorScheme = colorScheme
         }
+    }
+    
+    private func loadContent(in webView: WKWebView) {
+        let textColor = colorScheme == .dark ? "white" : "#333"
+        //let backgroundColor = colorScheme == .dark ? "black" : "white"
+        
+        let css = """
+        <style>
+            body {
+                font-size: 18px;
+                line-height: 1.6;
+                color: \(textColor);
+                padding: 16px;
+                margin: 0;
+                
+            }
+            img { max-width: 100% !important; height: auto !important; }
+            a { color: \(colorScheme == .dark ? "#7FB3FF" : "#0066CC"); }
+        </style>
+        """
+        
+        let meta = "<meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+        webView.loadHTMLString(meta + css + htmlContent, baseURL: nil)
     }
     
     func makeCoordinator() -> Coordinator {
@@ -107,14 +117,13 @@ struct DynamicHeightWebView: UIViewRepresentable {
     
     class Coordinator: NSObject, WKNavigationDelegate {
         var parent: DynamicHeightWebView
-        var loaded = false
+        var lastColorScheme: ColorScheme?
         
         init(parent: DynamicHeightWebView) {
             self.parent = parent
         }
         
         func webView(_ webView: WKWebView, didFinish navigation: WKNavigation!) {
-            // 页面加载完成后计算内容高度
             webView.evaluateJavaScript("document.body.scrollHeight") { (height, _) in
                 if let height = height as? CGFloat {
                     DispatchQueue.main.async {
@@ -122,8 +131,7 @@ struct DynamicHeightWebView: UIViewRepresentable {
                     }
                 }
             }
-            loaded = true
+            lastColorScheme = parent.colorScheme
         }
     }
 }
-

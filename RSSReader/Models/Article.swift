@@ -11,6 +11,7 @@ import Foundation
 struct Article: Identifiable, Codable, Equatable {
     // 文章唯一标识符
     let id: UUID
+    let feedID: UUID
     // 文章标题
     var title: String
     // 文章摘要
@@ -26,7 +27,7 @@ struct Article: Identifiable, Codable, Equatable {
     // 是否收藏标记
     var isFavorite: Bool
     // 所属订阅源的ID
-    var feedID: UUID
+    
 
     /// 初始化方法
     /// - Parameters:
@@ -41,16 +42,18 @@ struct Article: Identifiable, Codable, Equatable {
     ///   - feedID: 所属订阅源ID
     init(
         id: UUID = UUID(),
+        feedID: UUID,
         title: String,
         summary: String,
         content: String,
         date: Date,
         link: URL,
         isRead: Bool = false,
-        isFavorite: Bool = false,
-        feedID: UUID
+        isFavorite: Bool = false
+        
     ) {
         self.id = id
+        self.feedID = feedID
         self.title = title
         self.summary = summary
         self.content = content
@@ -58,6 +61,6 @@ struct Article: Identifiable, Codable, Equatable {
         self.link = link
         self.isRead = isRead
         self.isFavorite = isFavorite
-        self.feedID = feedID
+        
     }
 }

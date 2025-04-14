@@ -20,9 +20,10 @@ class ArticleListViewModel: ObservableObject {
     // MARK: - 私有属性
     /// 存储所有文章的原始数据（未过滤）
     private var allArticles: [Article] = []
+    private var currentFeedArticles: [Article] = [] // 新增：当前订阅源文章
     /// Combine订阅容器
     private var cancellables = Set<AnyCancellable>()
-    
+    private var currentFeedID: UUID? // 新增：当前订阅源ID
     // MARK: - 过滤枚举
     /// 文章过滤条件枚举
     enum ArticleFilter {
@@ -33,7 +34,7 @@ class ArticleListViewModel: ObservableObject {
     
     // MARK: - 初始化方法
     init() {
-        loadAllArticles()
+        
         // 监听过滤条件变化
         $filter
             .sink { [weak self] _ in self?.applyFilter() }
@@ -42,38 +43,55 @@ class ArticleListViewModel: ObservableObject {
     
     // MARK: - 数据加载方法
     /// 加载指定订阅源的文章（带本地缓存）
-    func loadArticles(for feed: Feed) {
+func loadArticles(for feed: Feed) {
+        currentFeedID = feed.id
         let fileURL = getDocumentsDirectory().appendingPathComponent("articles.json")
         
-        // ✅ 文件存在性检查
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            print("未找到缓存文件，返回空文章列表")
-            articles = []
+            resetArticles()
             return
         }
         
         do {
-            // 读取并解码JSON数据
             let data = try Data(contentsOf: fileURL)
-            articles = try JSONDecoder().decode([Article].self, from: data)
+            allArticles = try JSONDecoder().decode([Article].self, from: data)
+            allArticles.prefix(5).forEach {
+                print("\($0.id):\($0.feedID):\(feed.id) | 匹配结果: \($0.feedID == feed.id)")
+                        }
+            applyFilter()
         } catch {
-            print("文章加载失败: \(error)")
-            articles = [] // 安全保护措施
+            print("加载文章失败: \(error.localizedDescription)")
+            resetArticles()
         }
     }
     
-    // MARK: - 过滤方法
     /// 应用当前过滤条件
     private func applyFilter() {
+        // 1. 按当前订阅源过滤
+        currentFeedArticles = allArticles.filter {article in
+            article.feedID == currentFeedID}
+        //    guard let currentID = currentFeedID else { return false }
+        //    return article.feedID == currentID
+        //}
+        
+        // 2. 应用附加过滤条件
         switch filter {
         case .all:
-            articles = allArticles
+            articles = currentFeedArticles
         case .unread:
-            articles = allArticles.filter { !$0.isRead }
+            articles = currentFeedArticles.filter { !$0.isRead }
         case .favorites:
-            articles = allArticles.filter { $0.isFavorite }
+            articles = currentFeedArticles.filter { $0.isFavorite }
         }
     }
+        
+    private func resetArticles() {
+        allArticles = []
+        currentFeedArticles = []
+        articles = []
+    }
+        
+        
     
     // MARK: - 状态更新方法
     /// 标记文章为已读
@@ -104,12 +122,12 @@ class ArticleListViewModel: ObservableObject {
     // MARK: - 数据刷新方法
     /// 从订阅源刷新文章数据
     func refreshFromFeed(_ feed: Feed) {
-        FeedService.shared.fetchArticles(from: feed.url) { result in
+        FeedService.shared.fetchArticles(from: feed) { result in
             switch result {
             case .success(let newArticles):
                 var savedArticles = Persistence.shared.loadArticles()
                 let existingIDs = Set(savedArticles.map { $0.link })
-                
+                _ = newArticles.filter { $0.feedID == feed.id }
                 // 去重处理
                 let uniqueArticles = newArticles.filter { !existingIDs.contains($0.link) }
                 
@@ -125,11 +143,6 @@ class ArticleListViewModel: ObservableObject {
         }
     }
     
-    // MARK: - 辅助方法
-    /// 加载所有文章（初始化用）
-    private func loadAllArticles() {
-        allArticles = Persistence.shared.loadArticles()
-        applyFilter()
-    }
+
 }
 

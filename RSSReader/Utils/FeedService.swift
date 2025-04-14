@@ -22,9 +22,9 @@ class FeedService {
     /// - Parameters:
     ///   - feedURL: 订阅源的URL地址
     ///   - completion: 完成回调，返回Result类型（成功包含文章数组，失败包含Error）
-    func fetchArticles(from feedURL: URL, completion: @escaping (Result<[Article], Error>) -> Void) {
+    func fetchArticles(from feed: Feed, completion: @escaping (Result<[Article], Error>) -> Void) {
         // 创建URLSession数据任务
-        URLSession.shared.dataTask(with: feedURL) { data, response, error in
+        URLSession.shared.dataTask(with: feed.url) { data, response, error in
             // 错误处理
             if let error = error {
                 DispatchQueue.main.async {
@@ -44,7 +44,8 @@ class FeedService {
             // 使用RSS解析器处理数据
             let parser = RSSParser()
             do {
-                let feed = Feed(id: UUID(),title: "", url: feedURL)
+                
+                //let feed = Feed(id: , title: "", url: feedURL)
                 let (_, articles) = try parser.parse(data: data, feed: feed)
                 DispatchQueue.main.async {
                     completion(.success(articles)) // 同时返回 feedTitle 和 articles

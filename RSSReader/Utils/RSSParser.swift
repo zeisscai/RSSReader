@@ -29,12 +29,13 @@ class RSSParser: NSObject, XMLParserDelegate {
     ///   - feedID: 关联的Feed ID
     /// - Returns: 元组(Feed标题, 文章数组)
     /// - Throws: 解析错误时抛出异常
-    func parse(data: Data, feedID: UUID) throws -> (String?, [Article]) {
+    func parse(data: Data, feed: Feed) throws -> (String?, [Article]) {
         // 初始化解析状态
-        self.feedID = feedID
+        self.feedID = feed.id
+        print("[解析器] 使用的Feed ID: \(feedID ?? UUID())")
         self.articles = []
         self.currentFeedTitle = ""
-        
+        //feedID = feed.id
         // 创建XML解析器
         let parser = XMLParser(data: data)
         parser.delegate = self
@@ -80,8 +81,8 @@ class RSSParser: NSObject, XMLParserDelegate {
         switch currentElement {
         case "title":
             if isInChannel {
-            
-                currentFeedTitle = string.trimmingCharacters(in: .whitespacesAndNewlines)
+                // 改为累加而不是直接赋值，防止标题分段
+                            currentFeedTitle += string
             } else {
                 currentTitle += string // 累加文章标题
             }
@@ -101,6 +102,8 @@ class RSSParser: NSObject, XMLParserDelegate {
                 namespaceURI: String?, qualifiedName qName: String?) {
         // 处理channel结束标签
         if elementName == "channel" {
+            currentFeedTitle = currentFeedTitle
+                        .trimmingCharacters(in: .whitespacesAndNewlines)
             isInChannel = false
             
         }
@@ -109,16 +112,21 @@ class RSSParser: NSObject, XMLParserDelegate {
         if elementName == "item" {
             // 验证并处理链接
             guard let url = URL(string: currentLink.trimmingCharacters(in: .whitespacesAndNewlines)) else { return }
-            
+            // 新增：处理HTML标签和特殊字符
+            let cleanSummary = currentDescription.strippingHTML()
+                .trimmingCharacters(in: .whitespacesAndNewlines)
             // 创建文章对象
             let article = Article(
+                feedID: self.feedID,// 关联Feed ID,
                 title: currentTitle.trimmingCharacters(in: .whitespacesAndNewlines),
-                summary: currentDescription.trimmingCharacters(in: .whitespacesAndNewlines),
+                summary: cleanSummary,
                 content: currentDescription,
                 date: parseDate(currentPubDate), // 解析日期字符串
-                link: url,
-                feedID: feedID // 关联Feed ID
+                link: url
+                
+                
             )
+            
             articles.append(article) // 添加到文章数组
         }
     }
