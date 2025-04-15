@@ -67,12 +67,15 @@ func loadArticles(for feed: Feed) {
     
     /// 应用当前过滤条件
     private func applyFilter() {
+        guard let currentID = currentFeedID else {
+            articles = []
+            return
+        }
+        
         // 1. 按当前订阅源过滤
-        currentFeedArticles = allArticles.filter {article in
-            article.feedID == currentFeedID}
-        //    guard let currentID = currentFeedID else { return false }
-        //    return article.feedID == currentID
-        //}
+        currentFeedArticles = allArticles.filter { $0.feedID == currentID }
+        print("当前订阅源ID: \(currentID)")
+        print("匹配到的文章数量: \(currentFeedArticles.count)")
         
         // 2. 应用附加过滤条件
         switch filter {
@@ -83,6 +86,7 @@ func loadArticles(for feed: Feed) {
         case .favorites:
             articles = currentFeedArticles.filter { $0.isFavorite }
         }
+        print("最终显示文章数量: \(articles.count)")
     }
         
     private func resetArticles() {

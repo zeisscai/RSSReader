@@ -21,8 +21,8 @@ struct RSSReaderApp: App {
         // 在iOS上表现为单个窗口，在macOS/iPadOS支持多窗口
         WindowGroup {
             // 设置应用启动时的初始视图
-            // FeedListView作为根视图，将填充整个窗口
-            FeedListView()
+            // 使用TabView作为根视图
+            MainTabView()
         }
     }
 }

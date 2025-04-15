@@ -6,6 +6,16 @@
 //
 // 导入Foundation框架，提供基础网络和数据处理功能
 import Foundation
+import Combine
+
+// 为Array添加分块扩展
+extension Array {
+    func chunked(into size: Int) -> [[Element]] {
+        return stride(from: 0, to: count, by: size).map {
+            Array(self[$0 ..< Swift.min($0 + size, count)])
+        }
+    }
+}
 
 // 使用@MainActor确保所有UI更新都在主线程执行
 // 遵循ObservableObject协议，用于在SwiftUI中实现数据绑定
@@ -16,16 +26,69 @@ class FeedListViewModel: ObservableObject {
     @Published var articles: [Article] = []  // 存储当前选中的文章列表
     private let parser = RSSParser()        // RSS解析器实例
 
+    private let refreshSubject = PassthroughSubject<Void, Never>()
+    private var cancellables = Set<AnyCancellable>()
+
     init() {
+        // 初始化时加载已有订阅源
+        loadInitialData()
+        
+        // 设置文章状态变化的通知观察者
+        setupObservers()
+    }
+    
+    private func loadInitialData() {
+        Task { @MainActor in
+            do {
+                let loadedFeeds = Persistence.shared.loadFeeds()
+                self.feeds = loadedFeeds
+                print("成功加载\(loadedFeeds.count)个订阅源")
+                
+                // 初始加载文章数据
+                if !loadedFeeds.isEmpty {
+                    self.reloadArticlesFromDisk()
+                }
+                // 确保faviconKey初始化
+                self.refreshAllFaviconKeys()
+            } catch {
+                print("初始化加载失败: \(error)")
+                self.feeds = []
+            }
+        }
+    }
+    
+    private func setupObservers() {
+        // 文章状态变化观察者
         NotificationCenter.default.addObserver(
             forName: .articleStatusChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            guard let self = self else { return }
-            Task { @MainActor in
-                self.reloadArticlesFromDisk()
+            self?.handleArticleStatusChange()
+        }
+        
+        // 刷新逻辑
+        refreshSubject
+            .debounce(for: .seconds(0.5), scheduler: DispatchQueue.main)
+            .flatMap { _ in
+                Future<Void, Never> { [weak self] promise in
+                    Task {
+                        await self?.performRefresh()
+                        promise(.success(()))
+                    }
+                }
             }
+            .receive(on: DispatchQueue.main)
+            .sink { [weak self] _ in
+                self?.refreshAllFaviconKeys()
+            }
+            .store(in: &cancellables)
+    }
+    
+    private func handleArticleStatusChange() {
+        Task { @MainActor in
+            self.reloadArticlesFromDisk()
+            self.updateUnreadCountCache()
         }
     }
 
@@ -33,6 +96,7 @@ class FeedListViewModel: ObservableObject {
     func reloadArticlesFromDisk() {
         let all = Persistence.shared.loadArticles()
         self.articles = all
+        self.updateUnreadCountCache()
     }
     
     // MARK: - 数据加载方法
@@ -60,10 +124,11 @@ class FeedListViewModel: ObservableObject {
     /// - Parameters:
     ///   - urlString: 订阅源URL字符串
     ///   - customTitle: 用户自定义标题（可选）
-    func addFeed(urlString: String, customTitle: String? = nil) {
+    ///   - completion: 操作完成回调，参数为 Result<Void, Error>
+    func addFeed(urlString: String, customTitle: String? = nil, completion: ((Result<Void, Error>) -> Void)? = nil) {
         // 验证URL有效性
         guard let url = URL(string: urlString) else {
-            print("无效的URL格式")
+            completion?(.failure(NSError(domain: "FeedListViewModel", code: -1, userInfo: [NSLocalizedDescriptionKey: "无效的URL格式"])))
             return
         }
 
@@ -89,13 +154,15 @@ class FeedListViewModel: ObservableObject {
                 let newFeed = Feed(id: feedID, title: finalTitle, url: url, link: homepageURL)
                 
                 // 主线程更新数据源
-                DispatchQueue.main.async {
+                await MainActor.run {
                     self.feeds.append(newFeed)
+                    Persistence.shared.saveFeeds(self.feeds)
+                    self.refreshAllFaviconKeys()
                 }
+                completion?(.success(()))
             } catch {
-                // 统一错误处理
                 print("订阅添加失败: \(error)")
-                // 实际项目中可在此处添加错误提示状态
+                completion?(.failure(error))
             }
         }
     }
@@ -107,17 +174,24 @@ class FeedListViewModel: ObservableObject {
         feeds.remove(atOffsets: offsets)
     }
 
-    /// 刷新所有订阅源，拉取所有订阅源的最新文章
-    func refreshAllFeeds() async {
+
+    func triggerRefresh() {
+        refreshSubject.send(())
+    }
+
+    private func performRefresh() async {
         // 先加载本地所有文章，便于合并已读/收藏状态
         let localArticles = Persistence.shared.loadArticles()
         var allArticles: [Article] = []
+        
+        // 串行处理每个订阅源
         for feed in feeds {
             do {
                 let (data, _) = try await URLSession.shared.data(from: feed.url)
-                let (_, _, newArticles) = try parser.parse(data: data, feed: feed)
+                let (_, _, newArticles) = try self.parser.parse(data: data, feed: feed)
+                
                 // 合并本地已读/收藏状态
-                let merged = newArticles.map { new in
+                let mergedArticles = newArticles.map { new in
                     if let local = localArticles.first(where: { $0.link == new.link }) {
                         var copy = new
                         copy.isRead = local.isRead
@@ -126,22 +200,41 @@ class FeedListViewModel: ObservableObject {
                     }
                     return new
                 }
-                allArticles.append(contentsOf: merged)
+                
+                allArticles.append(contentsOf: mergedArticles)
+                
+                // 每个订阅源处理完后立即更新UI
+                await MainActor.run {
+                    self.articles = allArticles
+                    Persistence.shared.saveArticles(allArticles)
+                    self.updateUnreadCountCache()
+                }
+                
             } catch {
                 print("刷新订阅源失败: \(feed.title) \(error)")
             }
         }
-        // 主线程更新
-        await MainActor.run {
-            self.articles = allArticles
-            // 持久化保存所有文章，供 ArticleListViewModel 读取
-            Persistence.shared.saveArticles(allArticles)
-        }
     }
 
-    /// 获取某个订阅源的未读数
+    // 未读数缓存
+    private var unreadCountCache: [UUID: Int] = [:]
+    
+    /// 获取某个订阅源的未读数（使用缓存优化性能）
     func unreadCount(for feed: Feed) -> Int {
-        articles.filter { $0.feedID == feed.id && !$0.isRead }.count
+        if let cached = unreadCountCache[feed.id] {
+            return cached
+        }
+        let count = articles.filter { $0.feedID == feed.id && !$0.isRead }.count
+        unreadCountCache[feed.id] = count
+        return count
+    }
+    
+    /// 更新未读数缓存（在文章状态变化时调用）
+    private func updateUnreadCountCache() {
+        unreadCountCache.removeAll()
+        for feed in feeds {
+            unreadCountCache[feed.id] = articles.filter { $0.feedID == feed.id && !$0.isRead }.count
+        }
     }
 
     // MARK: - favicon 刷新支持
@@ -151,6 +244,15 @@ class FeedListViewModel: ObservableObject {
     func refreshAllFaviconKeys() {
         for feed in feeds {
             faviconKey[feed.id, default: 0] += 1
+        }
+    }
+
+    /// 更新订阅源信息（标题和链接）
+    func updateFeed(feed: Feed, newTitle: String, newURL: String) {
+        guard let url = URL(string: newURL) else { return }
+        if let index = feeds.firstIndex(where: { $0.id == feed.id }) {
+            feeds[index].title = newTitle
+            feeds[index].url = url
         }
     }
 }
