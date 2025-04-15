@@ -39,21 +39,16 @@ class FeedListViewModel: ObservableObject {
     
     private func loadInitialData() {
         Task { @MainActor in
-            do {
-                let loadedFeeds = Persistence.shared.loadFeeds()
-                self.feeds = loadedFeeds
-                print("成功加载\(loadedFeeds.count)个订阅源")
-                
-                // 初始加载文章数据
-                if !loadedFeeds.isEmpty {
-                    self.reloadArticlesFromDisk()
-                }
-                // 确保faviconKey初始化
-                self.refreshAllFaviconKeys()
-            } catch {
-                print("初始化加载失败: \(error)")
-                self.feeds = []
+            let loadedFeeds = Persistence.shared.loadFeeds()
+            self.feeds = loadedFeeds
+            print("成功加载\(loadedFeeds.count)个订阅源")
+            
+            // 初始加载文章数据
+            if !loadedFeeds.isEmpty {
+                self.reloadArticlesFromDisk()
             }
+            // 确保faviconKey初始化
+            self.refreshAllFaviconKeys()
         }
     }
     
@@ -64,7 +59,9 @@ class FeedListViewModel: ObservableObject {
             object: nil,
             queue: .main
         ) { [weak self] _ in
-            self?.handleArticleStatusChange()
+            Task { @MainActor in
+                self?.handleArticleStatusChange()
+            }
         }
         
         // 刷新逻辑
