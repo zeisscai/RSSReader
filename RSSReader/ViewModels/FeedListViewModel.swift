@@ -60,13 +60,14 @@ class FeedListViewModel: ObservableObject {
                 let feedID = UUID()
                 // 创建新的订阅源对象
                 let feed = Feed(id: feedID, title: "", url: url)
-                // 解析RSS数据
-                let (parsedTitle, _) = try parser.parse(data: data, feed: feed)
+                // 解析RSS数据，获取标题和主页链接
+                let (parsedTitle, parsedLink, _) = try parser.parse(data: data, feed: feed)
                 print("[添加订阅] 初始ID: \(feedID)")
                 // 确定最终显示标题：优先使用用户输入 > 解析结果 > 原始URL
                 let finalTitle = (customTitle?.isEmpty == false ? customTitle : parsedTitle) ?? urlString
-                
-                let newFeed = Feed(id: feedID, title: finalTitle, url: url)
+                // 主页链接
+                let homepageURL = parsedLink.flatMap { URL(string: $0) }
+                let newFeed = Feed(id: feedID, title: finalTitle, url: url, link: homepageURL)
                 
                 // 主线程更新数据源
                 DispatchQueue.main.async {

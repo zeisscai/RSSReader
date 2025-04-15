@@ -14,6 +14,7 @@ class RSSParser: NSObject, XMLParserDelegate {
     private var currentElement = "" // 当前解析的XML元素名
     private var currentTitle = "" // 当前解析的文章标题
     private var currentFeedTitle = "" // 当前解析的Feed标题
+    private var currentFeedLink = "" // 当前解析的Feed主页链接
     private var isInChannel = false // 是否在channel标签内的标志
     private var currentDescription = "" // 当前解析的文章描述
     private var currentLink = "" // 当前解析的文章链接
@@ -27,15 +28,15 @@ class RSSParser: NSObject, XMLParserDelegate {
     /// - Parameters:
     ///   - data: 要解析的XML数据
     ///   - feedID: 关联的Feed ID
-    /// - Returns: 元组(Feed标题, 文章数组)
+    /// - Returns: 元组(Feed标题, Feed主页链接, 文章数组)
     /// - Throws: 解析错误时抛出异常
-    func parse(data: Data, feed: Feed) throws -> (String?, [Article]) {
+    func parse(data: Data, feed: Feed) throws -> (String?, String?, [Article]) {
         // 初始化解析状态
         self.feedID = feed.id
         print("[解析器] 使用的Feed ID: \(feedID ?? UUID())")
         self.articles = []
         self.currentFeedTitle = ""
-        //feedID = feed.id
+        self.currentFeedLink = ""
         // 创建XML解析器
         let parser = XMLParser(data: data)
         parser.delegate = self
@@ -45,8 +46,12 @@ class RSSParser: NSObject, XMLParserDelegate {
             throw parser.parserError ?? NSError(domain: "RSSParser", code: -1, userInfo: nil)
         }
         
-        // 返回解析结果（去除空白字符的Feed标题和文章数组）
-        return (currentFeedTitle.trimmingCharacters(in: .whitespacesAndNewlines), articles)
+        // 返回解析结果（去除空白字符的Feed标题、主页链接和文章数组）
+        return (
+            currentFeedTitle.trimmingCharacters(in: .whitespacesAndNewlines),
+            currentFeedLink.trimmingCharacters(in: .whitespacesAndNewlines),
+            articles
+        )
     }
 
     // MARK: - XMLParserDelegate方法
@@ -82,14 +87,18 @@ class RSSParser: NSObject, XMLParserDelegate {
         case "title":
             if isInChannel {
                 // 改为累加而不是直接赋值，防止标题分段
-                            currentFeedTitle += string
+                currentFeedTitle += string
             } else {
                 currentTitle += string // 累加文章标题
             }
         case "description":
             currentDescription += string // 累加描述
         case "link":
-            currentLink += string // 累加链接
+            if isInChannel {
+                currentFeedLink += string // channel 的 link
+            } else {
+                currentLink += string // item 的 link
+            }
         case "pubDate":
             currentPubDate += string // 累加发布日期
         default:

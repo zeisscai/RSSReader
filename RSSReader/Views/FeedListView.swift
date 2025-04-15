@@ -26,8 +26,31 @@ struct FeedListView: View {
                 ForEach(viewModel.feeds) { feed in
                     // 为每个订阅源创建导航链接，点击跳转到文章列表
                     NavigationLink(destination: ArticleListView(feed: feed)) {
-                        // 显示订阅源标题
-                        Text(feed.title)
+                        HStack {
+                            // 显示原文主页 favicon
+                            if let link = feed.link,
+                               let host = link.host {
+                                let faviconURL = URL(string: "https://\(host)/favicon.ico")
+                                AsyncImage(url: faviconURL) { image in
+                                    image
+                                        .resizable()
+                                        .frame(width: 20, height: 20)
+                                        .cornerRadius(4)
+                                } placeholder: {
+                                    // 占位图标
+                                    Image(systemName: "globe")
+                                        .frame(width: 20, height: 20)
+                                        .foregroundColor(.gray)
+                                }
+                            } else {
+                                // 没有主页链接时显示默认图标
+                                Image(systemName: "globe")
+                                    .frame(width: 20, height: 20)
+                                    .foregroundColor(.gray)
+                            }
+                            // 显示订阅源标题
+                            Text(feed.title)
+                        }
                     }
                 }
                 // 添加滑动删除功能，绑定删除方法
