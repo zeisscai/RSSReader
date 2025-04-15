@@ -15,6 +15,25 @@ class FeedListViewModel: ObservableObject {
     @Published var feeds: [Feed] = []       // 存储订阅源列表数据
     @Published var articles: [Article] = []  // 存储当前选中的文章列表
     private let parser = RSSParser()        // RSS解析器实例
+
+    init() {
+        NotificationCenter.default.addObserver(
+            forName: .articleStatusChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            guard let self = self else { return }
+            Task { @MainActor in
+                self.reloadArticlesFromDisk()
+            }
+        }
+    }
+
+    /// 重新加载本地所有文章（用于未读数同步）
+    func reloadArticlesFromDisk() {
+        let all = Persistence.shared.loadArticles()
+        self.articles = all
+    }
     
     // MARK: - 数据加载方法
     
@@ -86,5 +105,52 @@ class FeedListViewModel: ObservableObject {
     func deleteFeed(at offsets: IndexSet) {
         // 直接操作数据源实现删除
         feeds.remove(atOffsets: offsets)
+    }
+
+    /// 刷新所有订阅源，拉取所有订阅源的最新文章
+    func refreshAllFeeds() async {
+        // 先加载本地所有文章，便于合并已读/收藏状态
+        let localArticles = Persistence.shared.loadArticles()
+        var allArticles: [Article] = []
+        for feed in feeds {
+            do {
+                let (data, _) = try await URLSession.shared.data(from: feed.url)
+                let (_, _, newArticles) = try parser.parse(data: data, feed: feed)
+                // 合并本地已读/收藏状态
+                let merged = newArticles.map { new in
+                    if let local = localArticles.first(where: { $0.link == new.link }) {
+                        var copy = new
+                        copy.isRead = local.isRead
+                        copy.isFavorite = local.isFavorite
+                        return copy
+                    }
+                    return new
+                }
+                allArticles.append(contentsOf: merged)
+            } catch {
+                print("刷新订阅源失败: \(feed.title) \(error)")
+            }
+        }
+        // 主线程更新
+        await MainActor.run {
+            self.articles = allArticles
+            // 持久化保存所有文章，供 ArticleListViewModel 读取
+            Persistence.shared.saveArticles(allArticles)
+        }
+    }
+
+    /// 获取某个订阅源的未读数
+    func unreadCount(for feed: Feed) -> Int {
+        articles.filter { $0.feedID == feed.id && !$0.isRead }.count
+    }
+
+    // MARK: - favicon 刷新支持
+    @Published var faviconKey: [UUID: Int] = [:]
+
+    /// 刷新所有 favicon key，强制 AsyncImage 重新加载
+    func refreshAllFaviconKeys() {
+        for feed in feeds {
+            faviconKey[feed.id, default: 0] += 1
+        }
     }
 }

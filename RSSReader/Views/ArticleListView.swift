@@ -12,13 +12,26 @@ struct ArticleListView: View {
     // MARK: - 数据依赖
     let feed: Feed                     // 当前显示的订阅源数据
     @StateObject private var viewModel = ArticleListViewModel()  // 文章列表视图模型
+    @State private var filter: ArticleListViewModel.ArticleFilter = .all
+
+    // 过滤后的文章
+    private var filteredArticles: [Article] {
+        switch filter {
+        case .all:
+            return viewModel.articles
+        case .unread:
+            return viewModel.articles.filter { !$0.isRead }
+        case .favorites:
+            return viewModel.articles.filter { $0.isFavorite }
+        }
+    }
     
     // MARK: - 视图主体
     var body: some View {
         // 使用列表展示文章集合
         List {
             // 遍历视图模型中的文章数据
-            ForEach(viewModel.articles) { article in
+            ForEach(filteredArticles) { article in
                 // 创建导航链接到文章详情页
                 NavigationLink(destination: ArticleDetailView(article: article)) {
                     // 文章信息垂直布局
@@ -57,6 +70,33 @@ struct ArticleListView: View {
                     }
                     .padding(.vertical, 4)  // 垂直方向内边距
                 }
+                // 支持滑动手势：标记已读/未读、收藏
+                .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                    Button {
+                        withAnimation {
+                            if article.isRead {
+                                // 标记为未读
+                                var updated = article
+                                updated.isRead = false
+                                viewModel.markAsRead(updated) // 这里需要实现 markAsUnread
+                            } else {
+                                viewModel.markAsRead(article)
+                            }
+                        }
+                    } label: {
+                        Label(article.isRead ? "标为未读" : "标为已读", systemImage: article.isRead ? "envelope.badge" : "envelope.open")
+                    }
+                    .tint(article.isRead ? .blue : .green)
+                    
+                    Button {
+                        withAnimation {
+                            viewModel.toggleFavorite(article)
+                        }
+                    } label: {
+                        Label(article.isFavorite ? "取消收藏" : "收藏", systemImage: article.isFavorite ? "star.slash" : "star")
+                    }
+                    .tint(.yellow)
+                }
             }
         }
         .listStyle(.insetGrouped)  // 设置列表样式为分组插入样式
@@ -66,16 +106,19 @@ struct ArticleListView: View {
             ToolbarItemGroup(placement: .navigationBarTrailing) {
                 // 过滤菜单
                 Menu {
-                    Button("全部") { viewModel.filter = .all }
-                    Button("未读") { viewModel.filter = .unread }
-                    Button("收藏") { viewModel.filter = .favorites }
+                    Button("全部") { filter = .all }
+                    Button("未读") { filter = .unread }
+                    Button("收藏") { filter = .favorites }
                 } label: {
                     Image(systemName: "line.3.horizontal.decrease.circle")
                 }
-                
-                // 刷新按钮
-                Button(action: { viewModel.refreshFromFeed(feed) }) {
-                    Image(systemName: "arrow.clockwise")
+            }
+        }
+        // 下拉刷新当前订阅源
+        .refreshable {
+            await withCheckedContinuation { cont in
+                viewModel.refreshFromFeed(feed) {
+                    cont.resume()
                 }
             }
         }
@@ -85,5 +128,3 @@ struct ArticleListView: View {
         }
     }
 }
-
-

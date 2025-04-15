@@ -38,6 +38,8 @@ class ArticleDetailViewModel: ObservableObject {
             Persistence.shared.saveArticles(allArticles)
             // 更新当前视图模型中的文章引用
             article = updated
+            // 通知全局未读数刷新
+            NotificationCenter.default.post(name: .articleStatusChanged, object: nil)
         }
     }
 

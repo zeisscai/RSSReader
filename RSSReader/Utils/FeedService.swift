@@ -1,12 +1,5 @@
-//
-//  FeedService.swift
-//  RSSReader
-//
-//  Created by Zwiss Cai on 2025/4/14.
-//
-
-// 导入Foundation框架
 import Foundation
+import Combine
 
 /// 订阅源服务类（单例模式），负责获取和解析RSS订阅内容
 class FeedService {
@@ -46,7 +39,7 @@ class FeedService {
             do {
                 
                 //let feed = Feed(id: , title: "", url: feedURL)
-                let (_, articles) = try parser.parse(data: data, feed: feed)
+                let (_, _, articles) = try parser.parse(data: data, feed: feed)
                 DispatchQueue.main.async {
                     completion(.success(articles)) // 同时返回 feedTitle 和 articles
                             }
@@ -57,5 +50,88 @@ class FeedService {
                 }
             }
         }.resume()  // 启动网络请求任务
+    }
+    
+    // MARK: - 订阅导入导出功能
+    
+    /// 导出所有订阅为OPML格式文件，返回文件URL
+    func exportFeeds(feeds: [Feed]) -> URL? {
+        // 过滤有效订阅，确保导出内容不为空
+        let validFeeds = feeds.filter { !$0.url.absoluteString.isEmpty }
+        guard !validFeeds.isEmpty else {
+            print("导出订阅失败：无有效订阅")
+            return nil
+        }
+        let opmlString = generateOPML(from: validFeeds)
+        guard let data = opmlString.data(using: .utf8) else {
+            print("导出订阅失败：编码失败")
+            return nil
+        }
+        // 如需自定义文件名（如用 feed 名字），可在此处修改 fileName 变量
+        // 当前实现与 iOS 18 无关，写死为 feed.opml
+        let fileName = "feed.opml"
+        let tempDir = FileManager.default.temporaryDirectory
+        let fileURL = tempDir.appendingPathComponent(fileName)
+        do {
+            // 先删除已存在的文件，避免写入失败
+            if FileManager.default.fileExists(atPath: fileURL.path) {
+                try FileManager.default.removeItem(at: fileURL)
+            }
+            try data.write(to: fileURL, options: .atomic)
+            // 设置文件权限为可读写
+            var fileAttributes = [FileAttributeKey: Any]()
+            fileAttributes[.posixPermissions] = 0o644
+            try FileManager.default.setAttributes(fileAttributes, ofItemAtPath: fileURL.path)
+            return fileURL
+        } catch {
+            print("导出订阅失败: \(error)")
+            return nil
+        }
+    }
+
+    private func generateOPML(from feeds: [Feed]) -> String {
+        var opml = """
+        <?xml version="1.0" encoding="UTF-8"?>
+        <opml version="1.0">
+          <head>
+            <title>RSSReader Subscriptions</title>
+          </head>
+          <body>
+        """
+        for feed in feeds {
+            let title = feed.title.isEmpty ? feed.url.absoluteString : feed.title
+            let xmlUrl = feed.url.absoluteString
+            let htmlUrl = feed.link?.absoluteString
+            if let htmlUrl = htmlUrl, !htmlUrl.isEmpty {
+                opml += """
+                  <outline type="rss" text="\(title)" xmlUrl="\(xmlUrl)" htmlUrl="\(htmlUrl)"/>
+                """
+            } else {
+                opml += """
+                  <outline type="rss" text="\(title)" xmlUrl="\(xmlUrl)"/>
+                """
+            }
+        }
+        opml += """
+          </body>
+        </opml>
+        """
+        return opml
+    }
+    
+    /// 导入订阅，从JSON或OPML数据解析订阅数组
+    func importFeeds(from data: Data, fileExtension: String) throws -> [Feed] {
+        if fileExtension.lowercased() == "opml" {
+            return try parseOPML(data: data)
+        } else {
+            let decoder = JSONDecoder()
+            return try decoder.decode([Feed].self, from: data)
+        }
+    }
+
+    private func parseOPML(data: Data) throws -> [Feed] {
+        // 使用XMLParser解析OPML文件，提取订阅链接和标题
+        let parser = OPMLParser(data: data)
+        return try parser.parse()
     }
 }

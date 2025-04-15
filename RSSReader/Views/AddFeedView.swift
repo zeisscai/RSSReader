@@ -26,7 +26,7 @@ struct AddFeedView: View {
             // 表单布局
             Form {
                 // 自定义标题输入区
-                Section(header: Text("自定义名称（可选）")) {
+                Section(header: Text("订阅标题")) {
                     TextField("填写名称", text: $customTitle)
                 }
                 

@@ -117,11 +117,14 @@ func loadArticles(for feed: Feed) {
             Persistence.shared.saveArticles(savedArticles)
         }
         applyFilter()
+        // 通知全局未读数刷新
+        NotificationCenter.default.post(name: .articleStatusChanged, object: nil)
     }
     
     // MARK: - 数据刷新方法
     /// 从订阅源刷新文章数据
-    func refreshFromFeed(_ feed: Feed) {
+    /// 支持下拉刷新 async/await
+    func refreshFromFeed(_ feed: Feed, completion: (() -> Void)? = nil) {
         FeedService.shared.fetchArticles(from: feed) { result in
             switch result {
             case .success(let newArticles):
@@ -135,9 +138,13 @@ func loadArticles(for feed: Feed) {
                 savedArticles.append(contentsOf: uniqueArticles)
                 Persistence.shared.saveArticles(savedArticles)
                 self.loadArticles(for: feed)
-                
+                // 通知全局未读数刷新
+                NotificationCenter.default.post(name: .articleStatusChanged, object: nil)
+                completion?()
             case .failure(let error):
                 print("文章刷新失败: \(error)")
+                NotificationCenter.default.post(name: .articleStatusChanged, object: nil)
+                completion?()
                 // 可在此处添加错误状态提示
             }
         }
@@ -146,3 +153,7 @@ func loadArticles(for feed: Feed) {
 
 }
 
+// MARK: - 通知名
+extension Notification.Name {
+    static let articleStatusChanged = Notification.Name("articleStatusChanged")
+}
